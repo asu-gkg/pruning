@@ -38,6 +38,39 @@ def load_resnet18():
     return net
 
 
+class Compressor:
+    def __init__(self):
+        print("Compressor Init")
+
+    def compress(self, tensor):
+        print("I'm compressed!")
+        return tensor
+
+    def decompress(self, compressed_tensor):
+        return compressed_tensor
+
+
+class MySGD(optim.SGD):
+    def __init__(self, params, lr=0.01, momentum=0, dampening=0, weight_decay=0, nesterov=False):
+        super(CompressedSGD, self).__init__(params, lr, momentum, dampening, weight_decay, nesterov)
+        self.compressor = Compressor()
+
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                d_p = p.grad.data
+                compressed_d_p = self.compressor.compress(d_p)
+                p.data.add_(-group['lr'], compressed_d_p)
+
+        return loss
+
+
 if __name__ == '__main__':
     trainloader, testloader = load_data()
     net = load_resnet18()
