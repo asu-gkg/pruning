@@ -7,6 +7,7 @@ import numpy as np
 from torch.nn.utils import prune
 import matplotlib.pyplot as plt
 from torchvision.models import resnet18
+import argparse
 
 
 def load_data():
@@ -43,7 +44,8 @@ class Compressor:
         print("Compressor Init")
 
     def compress(self, tensor):
-        # print(".")
+        sparse = (torch.sum(tensor == 0).item() / tensor.numel()) * 100
+        # print(sparse, tensor.shape)
         return tensor
 
     def decompress(self, compressed_tensor):
@@ -52,7 +54,8 @@ class Compressor:
 
 class MySGD(optim.SGD):
     def __init__(self, params, lr=0.01, momentum=0, dampening=0, weight_decay=0, nesterov=False):
-        super(MySGD, self).__init__(params, lr, momentum, dampening, weight_decay, nesterov)
+        super(MySGD, self).__init__(params, lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay,
+                                    nesterov=nesterov)
         self.compressor = Compressor()
 
     def step(self, closure=None):
@@ -61,12 +64,34 @@ class MySGD(optim.SGD):
             loss = closure()
 
         for group in self.param_groups:
+            weight_decay = group['weight_decay']
+            momentum = group['momentum']
+            nesterov = group['nesterov']
+            dampening = group['dampening']
+            lr = group['lr']
+
             for p in group['params']:
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
+                if weight_decay != 0:
+                    if momentum != 0:
+                        param_state = self.state[p]
+                        if 'momentum_buffer' not in param_state:
+                            buf = param_state['momentum_buffer'] = d_p
+                        else:
+                            buf = param_state['momentum_buffer']
+                            buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+                        if nesterov:
+                            d_p = d_p.add(buf, alpha=momentum)
+                        else:
+                            d_p = buf
+                    d_p.add_(weight_decay, p.data)
+                else:
+                    d_p = d_p.add(p.grad)
+
                 compressed_d_p = self.compressor.compress(d_p)
-                p.data.add_(-group['lr'], compressed_d_p)
+                p.data.add_(-lr, compressed_d_p)
 
         return loss
 
@@ -94,12 +119,18 @@ def train_model(epoch, net, trainloader, optimizer, criterion):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
+    parser.add_argument('--compress', default=False, type=bool, help='compress')
+    args = parser.parse_args()
+
     trainloader, testloader = load_data()
     net = load_resnet18()
     print("Successfully load resnet18 model")
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = MySGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    optimizer = optim.SGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    if args.compress:
+        optimizer = MySGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
 
     for epoch in range(5):
