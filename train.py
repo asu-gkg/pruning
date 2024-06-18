@@ -70,8 +70,12 @@ class MySGD(optim.SGD):
 
         return loss
 
+def train_model(net, testloader):
+    pass
 
 if __name__ == '__main__':
     trainloader, testloader = load_data()
     net = load_resnet18()
+
+
     print("Successfully load resnet18 model")
