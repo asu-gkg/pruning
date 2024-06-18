@@ -43,7 +43,7 @@ class Compressor:
         print("Compressor Init")
 
     def compress(self, tensor):
-        print("I'm compressed!")
+        # print(".")
         return tensor
 
     def decompress(self, compressed_tensor):
@@ -52,7 +52,7 @@ class Compressor:
 
 class MySGD(optim.SGD):
     def __init__(self, params, lr=0.01, momentum=0, dampening=0, weight_decay=0, nesterov=False):
-        super(CompressedSGD, self).__init__(params, lr, momentum, dampening, weight_decay, nesterov)
+        super(MySGD, self).__init__(params, lr, momentum, dampening, weight_decay, nesterov)
         self.compressor = Compressor()
 
     def step(self, closure=None):
@@ -70,12 +70,38 @@ class MySGD(optim.SGD):
 
         return loss
 
-def train_model(net, testloader):
-    pass
+
+def train_model(epoch, net, trainloader, optimizer, criterion):
+    net.train()
+    train_loss = 0
+    correct = 0
+    total = 0
+    for batch_idx, (inputs, targets) in enumerate(trainloader):
+        inputs, targets = inputs.to('cuda'), targets.to('cuda')
+        optimizer.zero_grad()
+        outputs = net(inputs)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+        train_loss += loss.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+    accuracy = 100. * correct / total
+    print(f'Epoch {epoch}, Loss: {train_loss / len(trainloader)}, Accuracy: {accuracy}')
+    return accuracy
+
 
 if __name__ == '__main__':
     trainloader, testloader = load_data()
     net = load_resnet18()
-
-
     print("Successfully load resnet18 model")
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = MySGD(net.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
+
+    for epoch in range(5):
+        train_acc = train_model(epoch, net, trainloader, optimizer, criterion)
+        scheduler.step()
